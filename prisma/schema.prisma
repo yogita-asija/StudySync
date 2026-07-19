@@ -1,0 +1,471 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Level {
+  beginner
+  intermediate
+  advanced
+}
+
+enum Visibility {
+  public
+  private
+}
+
+enum SchedulingPermission {
+  owner
+  owner_cohost
+  all_members
+}
+
+enum GroupMode {
+  online
+  offline
+  hybrid
+}
+
+enum MembershipRole {
+  owner
+  cohost
+  member
+}
+
+enum MembershipStatus {
+  active
+  left
+  banned
+}
+
+enum RequestStatus {
+  pending
+  approved
+  rejected
+}
+
+enum RsvpStatus {
+  going
+  maybe
+  not_going
+}
+
+enum NotificationType {
+  join_request
+  approved
+  session_reminder
+  message
+  partner_invite
+  partner_response
+}
+
+enum PartnerStudyMode {
+  online
+  offline
+  hybrid
+  any
+}
+
+enum PartnerInviteStatus {
+  pending
+  accepted
+  rejected
+}
+
+model User {
+  id            String    @id @default(uuid())
+  name          String
+  email         String    @unique
+  passwordHash  String?
+  bio           String?
+  university    String    @default("")
+  timezone      String?
+  emailVerified DateTime?
+  image         String?
+  preferences   Json?
+  createdAt     DateTime  @default(now())
+
+  // Auth.js relations
+  accounts Account[]
+  sessions Session[]
+
+  // App relations
+  subjects        UserSubject[]
+  ownedGroups     StudyGroup[]      @relation("GroupOwner")
+  memberships     GroupMembership[]
+  joinRequests    JoinRequest[]     @relation("Requester")
+  reviewedReqs    JoinRequest[]     @relation("Reviewer")
+  createdSessions StudySession[]    @relation("SessionCreator")
+  attendances     SessionAttendee[]
+  messages        Message[]
+  notifications   Notification[]
+  bookmarks       Bookmark[]
+  reviews         Review[]
+  reports         Report[]
+  uploadedResources Resource[]         @relation("ResourceUploader")
+  resourceBookmarks ResourceBookmark[]
+
+  // Study Partners feature
+  studyPartnerProfile    StudyPartnerProfile?
+  sentPartnerInvites     PartnerInvite[]   @relation("PartnerInviteSender")
+  receivedPartnerInvites PartnerInvite[]   @relation("PartnerInviteReceiver")
+  partnerBookmarks       PartnerBookmark[] @relation("PartnerBookmarkOwner")
+  partnerBookmarkedBy    PartnerBookmark[] @relation("PartnerBookmarkTarget")
+
+  // AI Study Hub feature
+  aiGenerations AiGeneration[]
+
+  @@map("users")
+}
+
+// --- Auth.js required models ---
+
+model Account {
+  id                String  @id @default(uuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(uuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+// --- App domain models ---
+
+model Subject {
+  id   String @id @default(uuid())
+  name String @unique
+
+  userSubjects UserSubject[]
+  studyGroups  StudyGroup[]
+
+  @@map("subjects")
+}
+
+model UserSubject {
+  userId    String
+  subjectId String
+  level     Level
+  createdAt DateTime @default(now())
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subject Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
+  @@id([userId, subjectId])
+  @@map("user_subjects")
+}
+
+model StudyGroup {
+  id               String     @id @default(uuid())
+  ownerId          String
+  title            String
+  description      String?
+  primarySubjectId String?
+  visibility       Visibility @default(public)
+  maxMembers       Int?
+  mode             GroupMode  @default(online)
+  locationText     String?
+  difficulty       Level      @default(beginner)
+  bannerUrl        String?
+  university       String?
+  sessionSchedulingPermission SchedulingPermission @default(all_members)
+  createdAt        DateTime   @default(now())
+
+  owner          User              @relation("GroupOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  primarySubject Subject?          @relation(fields: [primarySubjectId], references: [id])
+  tags           GroupTag[]
+  memberships    GroupMembership[]
+  joinRequests   JoinRequest[]
+  studySessions  StudySession[]
+  messages       Message[]
+  bookmarks      Bookmark[]
+  reviews        Review[]
+  reports        Report[]
+  resources      Resource[]
+
+  @@map("study_groups")
+}
+
+model GroupTag {
+  groupId String
+  tag     String
+
+  group StudyGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@id([groupId, tag])
+  @@map("group_tags")
+}
+
+model GroupMembership {
+  groupId  String
+  userId   String
+  role     MembershipRole   @default(member)
+  status   MembershipStatus @default(active)
+  joinedAt DateTime         @default(now())
+
+  group StudyGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user  User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([groupId, userId])
+  @@map("group_memberships")
+}
+
+model JoinRequest {
+  id         String        @id @default(uuid())
+  groupId    String
+  userId     String
+  status     RequestStatus @default(pending)
+  reviewedBy String?
+  createdAt  DateTime      @default(now())
+  reviewedAt DateTime?
+
+  group    StudyGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user     User       @relation("Requester", fields: [userId], references: [id], onDelete: Cascade)
+  reviewer User?      @relation("Reviewer", fields: [reviewedBy], references: [id])
+
+  @@map("join_requests")
+}
+
+model StudySession {
+  id            String   @id @default(uuid())
+  groupId       String
+  createdBy     String
+  title         String   @default("Study Session")
+  startsAt      DateTime
+  durationMins  Int
+  meetingUrl    String?
+  notes         String?
+  notesFileUrl  String?
+  notesFileName String?
+  createdAt     DateTime @default(now())
+
+  group     StudyGroup        @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  creator   User              @relation("SessionCreator", fields: [createdBy], references: [id])
+  attendees SessionAttendee[]
+  resources Resource[]
+
+  @@map("study_sessions")
+}
+
+model SessionAttendee {
+  sessionId  String
+  userId     String
+  rsvpStatus RsvpStatus @default(going)
+  createdAt  DateTime   @default(now())
+
+  session StudySession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  user    User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([sessionId, userId])
+  @@map("session_attendees")
+}
+
+model Message {
+  id        String   @id @default(uuid())
+  groupId   String
+  senderId  String
+  content   String
+  imageUrl  String?
+  pinned    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  group  StudyGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  sender User       @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@map("messages")
+}
+
+model Review {
+  id        String   @id @default(uuid())
+  groupId   String
+  userId    String
+  rating    Int
+  comment   String?
+  createdAt DateTime @default(now())
+
+  group StudyGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user  User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, userId])
+  @@map("reviews")
+}
+
+model Report {
+  id        String   @id @default(uuid())
+  groupId   String
+  reporterId String
+  reason    String
+  createdAt DateTime @default(now())
+
+  group    StudyGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  reporter User       @relation(fields: [reporterId], references: [id], onDelete: Cascade)
+
+  @@map("reports")
+}
+
+model Resource {
+  id         String   @id @default(uuid())
+  groupId    String
+  sessionId  String?
+  uploadedBy String
+  name       String
+  fileUrl    String
+  fileName   String
+  createdAt  DateTime @default(now())
+
+  group     StudyGroup         @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  session   StudySession?      @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  uploader  User               @relation("ResourceUploader", fields: [uploadedBy], references: [id], onDelete: Cascade)
+  bookmarks ResourceBookmark[]
+
+  @@map("resources")
+}
+
+model ResourceBookmark {
+  id         String   @id @default(uuid())
+  userId     String
+  resourceId String
+  createdAt  DateTime @default(now())
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  resource Resource @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, resourceId])
+  @@map("resource_bookmarks")
+}
+
+model Bookmark {
+  id        String   @id @default(uuid())
+  userId    String
+  groupId   String
+  createdAt DateTime @default(now())
+
+  user  User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  group StudyGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, groupId])
+  @@map("bookmarks")
+}
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String
+  type      NotificationType
+  payload   Json?
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+}
+
+// --- Study Partners feature ---
+
+model StudyPartnerProfile {
+  id          String           @id @default(uuid())
+  userId      String           @unique
+  year        String
+  branch      String
+  subjects    String[]         @default([])
+  skills      String[]         @default([])
+  studyMode   PartnerStudyMode @default(any)
+  availability String[]        @default([])
+  isActive    Boolean          @default(true)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("study_partner_profiles")
+}
+
+model PartnerInvite {
+  id          String              @id @default(uuid())
+  senderId    String
+  receiverId  String
+  message     String?
+  status      PartnerInviteStatus @default(pending)
+  createdAt   DateTime            @default(now())
+  respondedAt DateTime?
+
+  sender   User @relation("PartnerInviteSender", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver User @relation("PartnerInviteReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
+
+  @@unique([senderId, receiverId])
+  @@map("partner_invites")
+}
+
+model PartnerBookmark {
+  id               String   @id @default(uuid())
+  userId           String
+  bookmarkedUserId String
+  createdAt        DateTime @default(now())
+
+  user           User @relation("PartnerBookmarkOwner", fields: [userId], references: [id], onDelete: Cascade)
+  bookmarkedUser User @relation("PartnerBookmarkTarget", fields: [bookmarkedUserId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, bookmarkedUserId])
+  @@map("partner_bookmarks")
+}
+
+// --- AI Study Hub feature ---
+
+enum AiToolType {
+  explain
+  quiz
+  notes
+  interview
+}
+
+model AiGeneration {
+  id          String     @id @default(uuid())
+  userId      String
+  type        AiToolType
+  title       String
+  subject     String
+  topic       String
+  inputParams Json
+  result      String
+  isFavorite  Boolean    @default(false)
+  createdAt   DateTime   @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("ai_generations")
+}
