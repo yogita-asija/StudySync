@@ -120,9 +120,4 @@ src/
 
 **Prisma engine download errors during `npm install`** — this happens if your network blocks `binaries.prisma.sh`. Try again on a normal connection, or set `PRISMA_ENGINES_CHECKSUM_IGNORE_MISSING=1` as an environment variable before running the command.
 
-## Next steps you could add
 
-- Google OAuth (add a provider in `src/lib/auth.ts`, add `Account`/`VerificationToken` usage — already in the schema)
-- Session reminder emails/cron (the `notifications` table already supports a `session_reminder` type)
-- Report/block user (schema notes mention this as an optional v1 feature, not yet implemented)
-- Pagination on the groups list for scale
